@@ -11,9 +11,15 @@ analysis (e.g. motif identification, quantification of peaks etc.). Pipeline
 also and generates QC  statistics that will inform you about the quality of
 the peaksets generated.
 
+In addition this pipeline will also produce normalised BigWigs if the samples
+are generated using the quantitative ChIP-seq method.
+
 Functionality
 -------------
 
+- Will generate BigWigs. If the samples are ran as a quantitative ChIP-Rx
+  experiment then the samples will be normalised according to spike-in's (
+  usually sp1 or drosophila cells)
 - Takes Paired-end or single end :term:`Bam` files you want to call peaks in
   (e.g. ChIP-Seq or ATAC-Seq samples and their appropriate 'input' controls).
 - Runs peakcallers
@@ -180,8 +186,13 @@ stages of the pipeline
             * for paired-end samples a file with the frequency of fragment
               lengths (the distance between the paired reads 5' start positions)
 
+2) BigWigs
+   -------
+   Wiggle files that are normalised are generated depending on the type of ChIP-seq
+   i.e. ChIP-Rx is normalised to spike-ins.
 
-2) IDR.dir
+
+3) IDR.dir
     -------
     Directory conatining the output files from IDR analysis
     IDR is currently only set up to use with macs2 because this
@@ -192,8 +203,8 @@ stages of the pipeline
 
     Directory contains:
             * IDR_inputs.dir
-    This directory contains the files that are
-broad
+    This directory contains the files that are broad
+
     IDR_inputs.dir
 
     macs2.dir/
@@ -351,7 +362,6 @@ def connect():
 # start of pipelined tasks
 # 1) Preprocessing Steps - Filter bam files & generate bam stats
 ###########################################################################
-
 
 @jobs_limit(PARAMS.get("jobs_limit_db", 1), "db")
 @transform("design.tsv", suffix(".tsv"), ".load")
@@ -570,6 +580,7 @@ def filtering():
 # ### Make bigwigs of filtered bam files #####################################
 
 @transform((filterChipBAMs, filterInputBAMs),
+           add_inputs(getIdxstats),
            suffix(".bam"),
            ".bw")
 def buildBigWig(infile, outfile):
@@ -591,7 +602,14 @@ def buildBigWig(infile, outfile):
     inf = infile[0]
     # scale by Million reads mapped
     reads_mapped = Bamtools.getNumberOfAlignments(inf)
-    scale = 1000000.0 / float(reads_mapped)
+
+    if PARAMS['quant'] == 1:
+        scale = 
+    elif PARAMS['quant'] == 0:
+        scale = 1000000.0 / float(reads_mapped)
+    else:
+        raise KeyError('please add 0 for FALSE and 1 for TRUE to ')
+
     tmpfile = P.getTempFilename()
     contig_sizes = PARAMS["annotations_interface_contigs"]
     job_memory = "3G"
