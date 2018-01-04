@@ -27,6 +27,9 @@ import sys
 import tempfile
 import time
 import io
+import glob
+import fnmatch
+import importlib
 
 from multiprocessing.pool import ThreadPool
 
@@ -68,13 +71,64 @@ PARAMS = {}
 GLOBAL_OPTIONS, GLOBAL_ARGS = None, None
 
 
-def writeConfigFiles(pipeline_path, general_path):
+def writeConfigFiles(paths):
+    #pipeline_path, pipeline_path_2, general_path):
     '''create default configuration files in `path`.
     '''
+    # TO DO: I've modified this function with workarounds to make it more
+    # flexible in order to find an ini file, find a configuration dir and 
+    # copy pre-run sphinx-quickstart files if they exist.
+    # Other than creating a 'report' dir, it should not change the way it is
+    # run from CGATPipelines.
+    # See also bottom of script for changes when calling the 'config' option 
+    # Antonio
+    #paths = [pipeline_path, pipeline_path_2, general_path]
+    report_dir = 'pipeline_report'
+    try:
+        os.mkdir(report_dir) # Sphinx config files will be copied here
+                             # CGATReport only needs its conf.py to generate the rest
+                             # though
+    except FileExistsError:
+        E.warn("directory `%s` already exists" % report_dir)
+        raise
 
-    paths = [pipeline_path, general_path]
-    config_files = ['pipeline.ini', 'conf.py']
+    # Look for ini file:
+    f_count = 0
+    INI_list = []
+    for path in paths:
+        if os.path.exists(path) and os.path.isdir(path):
+            for f in os.listdir(os.path.abspath(path)):
+                if fnmatch.fnmatch(f, 'pipeline*ini'):
+                    f_count += 1
+                    INI_file = f
+                    INI_list.extend([INI_file])
 
+    if f_count == 1:
+        config_files = [INI_file] # This is for the pipeline only
+
+    elif f_count > 1:
+        # Prioritise the file that contains the command called if more than one
+        # ini file are found:
+        for f in INI_list:
+            if caller_name in f:
+                INI_file = f
+                config_files = [INI_file]
+    else:
+        if f_count == 0:
+            print('''
+                  No configuration (ini) files found in:
+                  {}
+                  '''.format(paths)
+                  )
+        else:
+            print('''
+                  Found several ini files but could not prioritise based on:
+                  {}
+                  Exiting.
+                  '''.format(caller_name))
+            sys.exit()
+
+    # Copy pipeline ini file:
     for dest in config_files:
         if os.path.exists(dest):
             E.warn("file `%s` already exists - skipped" % dest)
@@ -87,10 +141,113 @@ def writeConfigFiles(pipeline_path, general_path):
                 E.info("created new configuration file `%s` " % dest)
                 break
         else:
-            raise ValueError(
-                "default config file for `%s` not found in %s" %
-                (config_files, paths))
+            raise ValueError('''default config file for `%s`
+                                not found in
+                                %s
+                                A pipeline cannot be run without this.
+                             ''' % (config_files, paths))
 
+    # Copy Sphinx configuration files, enforce copy of 'conf.py' in case
+    # CGATReport is used:
+    dest = 'conf.py'
+    if os.path.exists(dest):
+        E.warn("file `%s` already exists - skipped" % dest)
+
+    for path in paths:
+        src = os.path.join(path, dest)
+        if os.path.exists(src):
+            # Put sphinx files in separate dir:
+            shutil.copyfile(src, os.path.join(report_dir, dest))
+            # Create a softlink outside of report_dir dir for CGATReport:
+            os.symlink(os.path.join(report_dir, dest), str(dest))
+            E.info("created new configuration file `%s` " % dest)
+            break
+
+    else:
+        # Only warn as pipeline can be run without report:
+        E.warn('''default config file for `%s` not found in
+                  %s
+                  CGATReport nor Sphinx can be run without this''' % (dest, paths))
+
+    # If other Sphinx config files are found, copy them if there is a skeleton
+    # pipeline report to use:
+    E.info('Looking for additional Sphinx configuration files.')
+    sphinx_config_files = ['Makefile',
+                           'make.bat',
+                           '*.rst',
+                           '*.bib',
+                           ] # These are for a sphinx setup, not needed
+                             # with CGATReport
+                             # A 'report_pipeline_*.rst' template is
+                             # searched for below
+
+    # Look for a pipeline report file:
+    f_count = 0
+    for path in paths:
+        if os.path.exists(path):
+            for f in os.listdir(os.path.abspath(path)):
+                # TO DO:
+                # This pattern matching is particular to 
+                # https://github.com/AntonioJBT/project_quickstart
+                # Needs to be made more generic
+                if fnmatch.fnmatch(f, 'report_pipeline_*.rst'):
+                    f_count += 1
+                    pipeline_report_file = f
+
+    if f_count == 1:
+        sphinx_config_files.append(pipeline_report_file)
+
+    else:
+        # Only warn as pipeline can be run without report:
+        E.warn('''There is no pipeline report file matching
+                  report_pipeline_*.rst
+                  in the directories:
+                  {}
+                  {}
+                  or
+                  {}
+                  Ignore this if you are using CGATReport.
+                  '''.format(pipeline_path, pipeline_path_2, general_path)
+                  )
+
+    # Copy the files across if they are found:
+    f_count = 0
+    # Check all the paths and their files given above when searching for config files:
+    for path in paths:
+        if os.path.exists(path):
+            for f in os.listdir(path):
+                # For each file or search term given, match to an existing file:
+                for dest in sphinx_config_files:
+                    if fnmatch.fnmatch(f, dest):
+                        f_to_copy = f
+                        # If a match is found, walk the cwd to check it's not
+                        # already present:
+                        for root, dirs, files in os.walk('.'):
+                            if f_to_copy in files:
+                                E.warn("file `%s` already exists - skipped" % f_to_copy)
+                                continue
+
+                        # If not present, copy the file:
+                        else:
+                            f_count += 1
+                            src = os.path.join(path, f_to_copy)
+                            if os.path.exists(src):
+                                # Put sphinx files in separate dir:
+                                shutil.copyfile(src, os.path.join(report_dir,
+                                                                  f_to_copy)
+                                                )
+                                E.info("created new configuration file `%s` "
+                                        % f_to_copy)
+                                break
+    if f_count > 0:
+        pass
+    else:
+        E.warn('''No sphinx-quickstart skeleton files such as:
+                  {}
+                  were found
+                  in
+                  {}
+                  Continuing without.'''.format(dest, paths))
 
 def printConfigFiles():
     '''
@@ -1016,12 +1173,54 @@ def main(args=sys.argv):
         printConfigFiles()
 
     elif options.pipeline_action == "config":
-        f = sys._getframe(1)
-        caller = f.f_globals["__file__"]
+    # (Antonio) I've modified this section, see explanation and changes in the
+    # writeConfigFiles function above.
+        config_paths = []
+        try:
+            f = sys._getframe(1)
+            caller = inspect.getargvalues(f).locals["__file__"]
+            # Make it easier to match the name of the command executed so that
+            # the config file can be searched in case there are more than one
+            # ini files found in writeConfig():
+            # Making it global, check if there's better way:
+            global caller_name
+            caller_name = os.path.basename(os.path.normpath(caller))
+        except KeyError as e:
+            # The following code only works if something like this function is
+            # present in my_pipeline.py script:
+            # http://stackoverflow.com/questions/4519127/setuptools-package-data-folder-location
+            f = sys._getframe(2)
+            caller = inspect.getargvalues(f).locals["__file__"]
+            cmd_caller = os.path.basename(os.path.normpath(caller))
+            # As above, save the command called in a separate variable:
+            global caller_name
+            caller_name = cmd_caller
+            cmd_caller = importlib.import_module(cmd_caller)
+            caller = cmd_caller.getDir()
+        else:
+            print('''Unable to find path to file being executed. Probably because
+                    CGATPipelines and the pipeline that is being executed
+                    cannot figure out where each other lives. Raise an issue in
+                    GitHub if possible. Exiting.''')
+
+            # CGATPipelines have a pipe_XX/pipe_XX hierarchy, but a simplified
+            # version would only have pipe_XX/
+            # so creating an additional pipeline_path
+            # TO DO: clean this up
         pipeline_path = os.path.splitext(caller)[0]
-        general_path = os.path.join(os.path.dirname(pipeline_path),
-                                    "configuration")
-        writeConfigFiles(pipeline_path, general_path)
+        pipeline_path_2 = os.path.dirname(pipeline_path)
+            # CGATPipelines have a "configuration" folder
+            # adding a glob to have a bit more flexibility
+        general_path = glob.glob(str(os.path.abspath(pipeline_path_2) +
+                                      '/**/configuration*'), recursive = True)
+
+        if not general_path:
+            general_path = os.path.join(os.path.dirname(pipeline_path), "configuration")
+
+        config_paths.extend([pipeline_path, pipeline_path_2])
+        # Extend separately in case general_path returns more than one file:
+        config_paths.extend(general_path)
+        writeConfigFiles(config_paths)
 
     elif options.pipeline_action == "clone":
         clonePipeline(options.pipeline_targets[0])
