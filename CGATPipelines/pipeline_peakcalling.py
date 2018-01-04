@@ -612,7 +612,7 @@ def buildBigWig(infile, outfile):
             file_name = idx.replace(".idxstats", "")
             if file_name == inf_name:
                 # pass to a function that extracts the number of reads aligned to
-                # spike in and human genome 
+                # spike in and human genome
                 regex = str(PARAMS['quant_regex']) + "*"
                 scale = PipelinePeakcalling.getSpikeInReads(idx, regex)
                 contig_sizes = PipelinePeakcalling.getContigSizes(idx)
