@@ -580,8 +580,8 @@ def filtering():
 # ### Make bigwigs of filtered bam files #####################################
 
 @transform((filterChipBAMs, filterInputBAMs),
-           add_inputs(getIdxstats),
            suffix(".bam"),
+           add_inputs([getIdxstats]),
            ".bw")
 def buildBigWig(infile, outfile):
     '''build wiggle files from bam files.
@@ -599,19 +599,34 @@ def buildBigWig(infile, outfile):
        Input filename in :term:`bed` format
 
     '''
-    inf = infile[0]
+    inf = infile[0][0]
+    inf_name = inf.replace(".bam", "")
+    idxstats = infile[1]
+
     # scale by Million reads mapped
     reads_mapped = Bamtools.getNumberOfAlignments(inf)
 
-    if PARAMS['quant'] == 1:
-        scale = 
-    elif PARAMS['quant'] == 0:
+    # To handle quantitative ChIP-seq
+    if PARAMS['quant_norm'] == 1:
+        for idx in idxstats:
+            file_name = idx.replace(".idxstats", "")
+            if file_name == inf_name:
+                # pass to a function that extracts the number of reads aligned to
+                # spike in and human genome 
+                regex = str(PARAMS['quant_regex']) + "*"
+                scale = PipelinePeakcalling.getSpikeInReads(idx, regex)
+                contig_sizes = PipelinePeakcalling.getContigSizes(idx)
+            else:
+                continue
+
+    elif PARAMS['quant_norm'] == 0:
         scale = 1000000.0 / float(reads_mapped)
+        contig_sizes = PARAMS["annotations_interface_contigs"]
     else:
-        raise KeyError('please add 0 for FALSE and 1 for TRUE to ')
+        raise KeyError('''please add 0 for FALSE and 1 for TRUE to quant_norm
+                        ini file''')
 
     tmpfile = P.getTempFilename()
-    contig_sizes = PARAMS["annotations_interface_contigs"]
     job_memory = "3G"
     statement = '''bedtools genomecov
     -ibam %(inf)s
@@ -619,7 +634,7 @@ def buildBigWig(infile, outfile):
     -bg
     -scale %(scale)f
     > %(tmpfile)s;
-    checkpoint;
+    sort -k1,1 -k2,2n -o %(tmpfile)s %(tmpfile)s;
     bedGraphToBigWig %(tmpfile)s %(contig_sizes)s %(outfile)s;
     checkpoint;
     rm -f %(tmpfile)s
