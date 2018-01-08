@@ -2147,7 +2147,9 @@ def export():
     pass
 
 
-@follows(mapping)
+@follows(mapping,
+         mergeBAMFiles,
+         mergeReadCounts)
 def full():
     pass
 
