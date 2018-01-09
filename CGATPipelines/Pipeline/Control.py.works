@@ -1193,7 +1193,6 @@ def main(args=sys.argv):
             caller = inspect.getargvalues(f).locals["__file__"]
             cmd_caller = os.path.basename(os.path.normpath(caller))
             # As above, save the command called in a separate variable:
-            global caller_name
             caller_name = cmd_caller
             cmd_caller = importlib.import_module(cmd_caller)
             caller = cmd_caller.getDir()
