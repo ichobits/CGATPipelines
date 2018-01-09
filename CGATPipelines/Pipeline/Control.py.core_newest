@@ -71,8 +71,59 @@ PARAMS = {}
 GLOBAL_OPTIONS, GLOBAL_ARGS = None, None
 
 
-def writeConfigFiles(paths):
-    #pipeline_path, pipeline_path_2, general_path):
+def getConfigPaths():
+    '''
+    Search the current and installation paths where the configuration files live.
+    '''
+    # (Antonio) I've modified this section, see explanation and changes in the
+    # writeConfigFiles function above.
+    config_paths = []
+    try:
+        f = sys._getframe(1)
+        caller = inspect.getargvalues(f).locals["__file__"]
+        # Make it easier to match the name of the command executed so that
+        # the config file can be searched in case there are more than one
+        # ini files found in writeConfig():
+        caller_name = os.path.basename(os.path.normpath(caller))
+    except KeyError as e:
+        # The following code only works if something like this function is
+        # present in my_pipeline.py script:
+        # http://stackoverflow.com/questions/4519127/setuptools-package-data-folder-location
+        f = sys._getframe(2)
+        caller = inspect.getargvalues(f).locals["__file__"]
+        cmd_caller = os.path.basename(os.path.normpath(caller))
+        # As above, save the command called in a separate variable:
+        caller_name = cmd_caller
+        cmd_caller = importlib.import_module(cmd_caller)
+        caller = cmd_caller.getDir()
+    else:
+        print('''Unable to find path to file being executed. Probably because
+                CGATPipelines and the pipeline that is being executed
+                cannot figure out where each other lives. Raise an issue in
+                GitHub if possible. Exiting.''')
+
+        # CGATPipelines have a pipe_XX/pipe_XX hierarchy, but a simplified
+        # version would only have pipe_XX/
+        # so creating an additional pipeline_path
+        # TO DO: clean this up
+    pipeline_path = os.path.splitext(caller)[0]
+    pipeline_path_2 = os.path.dirname(pipeline_path)
+        # CGATPipelines have a "configuration" folder
+        # adding a glob to have a bit more flexibility
+    general_path = glob.glob(str(os.path.abspath(pipeline_path_2) +
+                                  '/**/configuration*'), recursive = True)
+    if not general_path:
+        general_path = os.path.join(os.path.dirname(pipeline_path), "configuration")
+
+    # Add paths to search list:
+    config_paths.extend([pipeline_path, pipeline_path_2])
+    # Extend separately in case general_path returns more than one file:
+    config_paths.extend(general_path)
+
+    return(config_paths, caller_name)
+
+
+def writeConfigFiles(paths, caller_name):
     '''create default configuration files in `path`.
     '''
     # TO DO: I've modified this function with workarounds to make it more
@@ -80,9 +131,8 @@ def writeConfigFiles(paths):
     # copy pre-run sphinx-quickstart files if they exist.
     # Other than creating a 'report' dir, it should not change the way it is
     # run from CGATPipelines.
-    # See also bottom of script for changes when calling the 'config' option 
+    # See also getConfigPaths() above, these run when calling the 'config' option 
     # Antonio
-    #paths = [pipeline_path, pipeline_path_2, general_path]
     report_dir = 'pipeline_report'
     try:
         os.mkdir(report_dir) # Sphinx config files will be copied here
@@ -1173,54 +1223,7 @@ def main(args=sys.argv):
         printConfigFiles()
 
     elif options.pipeline_action == "config":
-    # (Antonio) I've modified this section, see explanation and changes in the
-    # writeConfigFiles function above.
-        config_paths = []
-        try:
-            f = sys._getframe(1)
-            caller = inspect.getargvalues(f).locals["__file__"]
-            # Make it easier to match the name of the command executed so that
-            # the config file can be searched in case there are more than one
-            # ini files found in writeConfig():
-            # Making it global, check if there's better way:
-            global caller_name
-            caller_name = os.path.basename(os.path.normpath(caller))
-        except KeyError as e:
-            # The following code only works if something like this function is
-            # present in my_pipeline.py script:
-            # http://stackoverflow.com/questions/4519127/setuptools-package-data-folder-location
-            f = sys._getframe(2)
-            caller = inspect.getargvalues(f).locals["__file__"]
-            cmd_caller = os.path.basename(os.path.normpath(caller))
-            # As above, save the command called in a separate variable:
-            global caller_name
-            caller_name = cmd_caller
-            cmd_caller = importlib.import_module(cmd_caller)
-            caller = cmd_caller.getDir()
-        else:
-            print('''Unable to find path to file being executed. Probably because
-                    CGATPipelines and the pipeline that is being executed
-                    cannot figure out where each other lives. Raise an issue in
-                    GitHub if possible. Exiting.''')
-
-            # CGATPipelines have a pipe_XX/pipe_XX hierarchy, but a simplified
-            # version would only have pipe_XX/
-            # so creating an additional pipeline_path
-            # TO DO: clean this up
-        pipeline_path = os.path.splitext(caller)[0]
-        pipeline_path_2 = os.path.dirname(pipeline_path)
-            # CGATPipelines have a "configuration" folder
-            # adding a glob to have a bit more flexibility
-        general_path = glob.glob(str(os.path.abspath(pipeline_path_2) +
-                                      '/**/configuration*'), recursive = True)
-
-        if not general_path:
-            general_path = os.path.join(os.path.dirname(pipeline_path), "configuration")
-
-        config_paths.extend([pipeline_path, pipeline_path_2])
-        # Extend separately in case general_path returns more than one file:
-        config_paths.extend(general_path)
-        writeConfigFiles(config_paths)
+        writeConfigFiles(getConfigPaths())
 
     elif options.pipeline_action == "clone":
         clonePipeline(options.pipeline_targets[0])
